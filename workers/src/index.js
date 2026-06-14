@@ -7,27 +7,61 @@ import jwt from 'jsonwebtoken'
 const app = new Hono()
 app.use('/*', cors())
 
+app.onError((err, c) => c.json({ error: err.message }, 500))
+
 async function parseBody(c) {
   const text = await c.req.text()
   return JSON.parse(text)
 }
 
-app.onError((err, c) => {
-  return c.json({ error: err.message }, 500)
+async function kvGet(c, key, fallback) {
+  try { const v = await c.env.NOVA_KV.get(key, 'json'); return v !== null ? v : fallback }
+  catch { return fallback }
+}
+
+async function kvPut(c, key, val) {
+  try { await c.env.NOVA_KV.put(key, JSON.stringify(val)) } catch {}
+}
+
+// ==================== AUTH ====================
+
+app.post('/api/auth/register', async (c) => {
+  const { username, password } = await parseBody(c)
+  if (!username || !password) return c.json({ error: 'username and password required' }, 400)
+  let users = await kvGet(c, 'users', [])
+  if (users.find(u => u.username === username)) return c.json({ error: 'user already exists' }, 400)
+  const hashedPassword = await bcrypt.hash(password, 10)
+  users.push({ username, password: hashedPassword })
+  await kvPut(c, 'users', users)
+  return c.json({ status: 'ok' })
 })
 
-app.post('/api/debug/body', async (c) => {
-  const text = await c.req.text()
-  try { JSON.parse(text); return c.json({ text, length: text.length, chars: [...text].map(c => c.charCodeAt(0)), valid: true }) }
-  catch (e) { return c.json({ text, length: text.length, chars: [...text].map(c => c.charCodeAt(0)), valid: false, error: e.message }) }
+app.post('/api/auth/login', async (c) => {
+  const { username, password } = await parseBody(c)
+  let users = await kvGet(c, 'users', [])
+  const user = users.find(u => u.username === username)
+  if (!user) return c.json({ error: 'invalid credentials' }, 400)
+  const valid = await bcrypt.compare(password, user.password)
+  if (!valid) return c.json({ error: 'invalid credentials' }, 400)
+  const token = jwt.sign({ username }, c.env.JWT_SECRET || 'nova-secret-key-123', { expiresIn: '24h' })
+  return c.json({ token, username })
 })
 
-// In-memory stores
-let users = []
-let knowledgeBase = []
-let memory = {}
-let stats = { totalCalls: 0, totalTokens: 0, totalTime: 0, callsByMode: {}, callsByProvider: {} }
-let captchaTasks = [
+app.get('/api/auth/me', async (c) => {
+  const auth = c.req.header('Authorization')
+  const token = auth?.split(' ')[1]
+  if (!token) return c.json({ error: 'token required' }, 401)
+  try {
+    const user = jwt.verify(token, c.env.JWT_SECRET || 'nova-secret-key-123')
+    return c.json({ username: user.username })
+  } catch {
+    return c.json({ error: 'invalid token' }, 403)
+  }
+})
+
+// ==================== CAPTCHA ====================
+
+const captchaTasks = [
   { id: 1, type: 'math', content: 'Combien font 2 + 2 ?', options: ['3', '4', '5', '6'], answer: '4' },
   { id: 2, type: 'math', content: 'Combien font 10 × 3 ?', options: ['20', '30', '40', '13'], answer: '30' },
   { id: 3, type: 'math', content: 'Combien font 15 - 7 ?', options: ['6', '7', '8', '9'], answer: '8' },
@@ -36,37 +70,17 @@ let captchaTasks = [
   { id: 6, type: 'football', content: 'Combien de joueurs dans une équipe de foot ?', options: ['9', '10', '11', '12'], answer: '11' },
   { id: 7, type: 'football', content: "Qui a gagné le Ballon d'Or 2023 ?", options: ['Messi', 'Haaland', 'Mbappé', 'Ronaldo'], answer: 'Messi' },
 ]
-let captchaResponses = []
 
-function authenticateToken(c, next) {
-  const auth = c.req.header('Authorization')
-  const token = auth?.split(' ')[1]
-  if (!token) return c.json({ error: 'token required' }, 401)
-  try {
-    c.set('user', jwt.verify(token, c.env.JWT_SECRET || 'nova-secret-key-123'))
-    return next()
-  } catch {
-    return c.json({ error: 'invalid token' }, 403)
-  }
-}
+app.get('/api/captcha/task', (c) => {
+  const task = captchaTasks[Math.floor(Math.random() * captchaTasks.length)]
+  const { answer, ...publicTask } = task
+  return c.json(publicTask)
+})
+
+// ==================== CHAT ====================
 
 function tokenize(text) {
   return text.toLowerCase().split(/[^a-z0-9àâçéèêëîïôûùüÿœæ]+/).filter(Boolean)
-}
-
-function searchRAG(query, topK = 5) {
-  const qTokens = tokenize(query)
-  const scores = []
-  for (const entry of knowledgeBase) {
-    if (!entry.tokens) entry.tokens = tokenize(entry.content)
-    let score = 0
-    for (const qt of qTokens) {
-      if (entry.tokens.includes(qt)) score++
-    }
-    if (score > 0) scores.push({ score, content: entry.content, name: entry.name })
-  }
-  scores.sort((a, b) => b.score - a.score)
-  return scores.slice(0, topK)
 }
 
 function detectMode(prompt) {
@@ -102,11 +116,7 @@ async function* streamGemini(messages, apiKey) {
       buf = ''
       const t = line.trim()
       if (!t || !t.startsWith('data: ')) continue
-      try {
-        const j = JSON.parse(t.slice(6))
-        const text = j.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        if (text) yield text
-      } catch {}
+      try { const j = JSON.parse(t.slice(6)); const text = j.candidates?.[0]?.content?.parts?.[0]?.text || ''; if (text) yield text } catch {}
     }
   }
 }
@@ -181,56 +191,11 @@ async function* streamResponse(messages, provider, apiKeys) {
   }
 }
 
-function trackCall(mode, provider, tokens, time) {
-  stats.totalCalls++
-  stats.totalTokens += tokens || 0
-  stats.totalTime += time || 0
-  stats.callsByMode[mode] = (stats.callsByMode[mode] || 0) + 1
-  stats.callsByProvider[provider] = (stats.callsByProvider[provider] || 0) + 1
-}
+app.post('/api/chat', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
 
-// ==================== AUTH ====================
-
-app.post('/api/auth/register', async (c) => {
-  const { username, password } = await parseBody(c)
-  if (!username || !password) return c.json({ error: 'username and password required' }, 400)
-  if (users.find(u => u.username === username)) return c.json({ error: 'user already exists' }, 400)
-  const hashedPassword = await bcrypt.hash(password, 10)
-  users.push({ username, password: hashedPassword })
-  return c.json({ status: 'ok' })
-})
-
-app.post('/api/auth/login', async (c) => {
-  const { username, password } = await parseBody(c)
-  const user = users.find(u => u.username === username)
-  if (!user) return c.json({ error: 'invalid credentials' }, 400)
-  const valid = await bcrypt.compare(password, user.password)
-  if (!valid) return c.json({ error: 'invalid credentials' }, 400)
-  const token = jwt.sign({ username }, c.env.JWT_SECRET || 'nova-secret-key-123', { expiresIn: '24h' })
-  return c.json({ token, username })
-})
-
-app.get('/api/auth/me', authenticateToken, (c) => {
-  return c.json({ username: c.get('user').username })
-})
-
-// ==================== CAPTCHA ====================
-
-app.get('/api/captcha/task', (c) => {
-  const task = captchaTasks[Math.floor(Math.random() * captchaTasks.length)]
-  const { answer, ...publicTask } = task
-  return c.json(publicTask)
-})
-
-app.post('/api/captcha/submit', async (c) => {
-  const { taskId, answer, username } = await parseBody(c)
-  captchaResponses.push({ userId: username || 'anonymous', taskId, answer, timestamp: Date.now() })
-  return c.json({ status: 'ok' })
-})
-
-// ==================== CHAT ====================
-
-app.post('/api/chat', authenticateToken, async (c) => {
   const { messages, provider = 'gemini' } = await parseBody(c)
   if (!messages?.length) return c.json({ error: 'Messages required' }, 400)
 
@@ -238,22 +203,13 @@ app.post('/api/chat', authenticateToken, async (c) => {
   const start = Date.now()
   const apiKeys = { gemini: c.env.GEMINI_API_KEY, groq: c.env.GROQ_API_KEY, xai: c.env.XAI_API_KEY }
 
+  let memory = await kvGet(c, 'memory', {})
   let memoryContext = ''
-  if (memory.nom || memory.technologies?.length) {
-    memoryContext = '\nMémoire de l\'utilisateur:\n'
-    if (memory.nom) memoryContext += `- Nom: ${memory.nom}\n`
-    if (memory.technologies?.length) memoryContext += `- Technologies: ${memory.technologies.join(', ')}\n`
-  }
+  if (memory.nom) memoryContext += `\nMémoire: Nom: ${memory.nom}`
+  if (memory.technologies?.length) memoryContext += `\nTechnologies: ${memory.technologies.join(', ')}`
 
   const SYSTEM_BEHAVIOR = `Tu es NOVA, assistant IA créé par Florin Marcu.${memoryContext}
-RÈGLES DE COMPORTEMENT :
-1. Si l'utilisateur fait une demande VAGUE ou IMPRÉCISE, tu DOIS poser 2-3 questions pour clarifier avant de répondre.
-2. Si la demande est claire et précise, réponds directement.
-3. Tu es en français. Sois amical, concis et utile.
-
-OUTILS DISPONIBLES :
-- [TOOL:search] ta recherche → Cherche sur le web
-- [TOOL:url] https://... → Lit le contenu d'une page web`
+RÈGLES DE COMPORTEMENT : Réponds en français. Sois amical, concis et utile.`
 
   const enriched = [{ role: 'system', content: SYSTEM_BEHAVIOR }, ...messages.filter(m => m.role !== 'system')]
 
@@ -267,7 +223,11 @@ OUTILS DISPONIBLES :
       }
       const elapsed = Date.now() - start
       const tokensEst = Math.round(full.length / 4)
-      trackCall(mode, provider, tokensEst, elapsed)
+      let stats = await kvGet(c, 'stats', { totalCalls: 0, totalTokens: 0, totalTime: 0 })
+      stats.totalCalls++
+      stats.totalTokens += tokensEst
+      stats.totalTime += elapsed
+      await kvPut(c, 'stats', stats)
       stream.write(JSON.stringify({ type: 'done', content: full, elapsed, mode, tokens: tokensEst }) + '\n')
     } catch (err) {
       stream.write(JSON.stringify({ type: 'error', content: err.message }) + '\n')
@@ -277,16 +237,18 @@ OUTILS DISPONIBLES :
 
 // ==================== WEB SEARCH ====================
 
-app.post('/api/web-search', authenticateToken, async (c) => {
+app.post('/api/web-search', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
   const { query } = await parseBody(c)
   if (!query) return c.json({ error: 'query required' }, 400)
 
   return stream(c, async (stream) => {
     try {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`
-      const r = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      })
+      const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } })
       const html = await r.text()
       const results = []
       const regex = /<a rel="nofollow" class="result__a" href="([^"]*)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/gi
@@ -308,66 +270,98 @@ app.post('/api/web-search', authenticateToken, async (c) => {
 
 // ==================== WEB FETCH ====================
 
-app.post('/api/fetch-url', authenticateToken, async (c) => {
+app.post('/api/fetch-url', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
   const { url } = await parseBody(c)
   if (!url) return c.json({ error: 'URL required' }, 400)
 
   return stream(c, async (stream) => {
     try {
-      const r = await fetch(url, {
-        signal: AbortSignal.timeout(15000),
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      })
+      const r = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } })
       const html = await r.text()
-      const text = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      const text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '').replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
         .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 10000)
       stream.write(JSON.stringify({ type: 'done', content: text, url }) + '\n')
-    } catch (err) {
-      stream.write(JSON.stringify({ type: 'error', content: `Erreur: ${err.message}` }) + '\n')
-    }
+    } catch (err) { stream.write(JSON.stringify({ type: 'error', content: `Erreur: ${err.message}` }) + '\n') }
   })
 })
 
 // ==================== KNOWLEDGE BASE ====================
 
-app.post('/api/knowledge/add', authenticateToken, async (c) => {
+app.post('/api/knowledge/add', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
   const { name, content } = await parseBody(c)
   if (!name || !content) return c.json({ error: 'name and content required' }, 400)
-  knowledgeBase.push({ name, content, addedAt: Date.now() })
-  return c.json({ status: 'ok', total: knowledgeBase.length })
+  let kb = await kvGet(c, 'knowledge', [])
+  kb.push({ name, content, addedAt: Date.now() })
+  await kvPut(c, 'knowledge', kb)
+  return c.json({ status: 'ok', total: kb.length })
 })
 
-app.get('/api/knowledge/search', authenticateToken, (c) => {
+app.get('/api/knowledge/search', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
   const q = c.req.query('q')
-  if (!q) return c.json({ results: knowledgeBase.map(k => ({ name: k.name, content: k.content.slice(0, 200) })) })
-  return c.json({ results: searchRAG(q) })
+  let kb = await kvGet(c, 'knowledge', [])
+  if (!q) return c.json({ results: kb.map(k => ({ name: k.name, content: k.content.slice(0, 200) })) })
+  const qTokens = tokenize(q)
+  const scores = []
+  for (const entry of kb) {
+    const tokens = tokenize(entry.content)
+    let score = 0
+    for (const qt of qTokens) { if (tokens.includes(qt)) score++ }
+    if (score > 0) scores.push({ score, content: entry.content, name: entry.name })
+  }
+  scores.sort((a, b) => b.score - a.score)
+  return c.json({ results: scores.slice(0, 5) })
 })
 
 // ==================== MEMORY ====================
 
-app.get('/api/memory', authenticateToken, (c) => c.json(memory))
+app.get('/api/memory', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+  return c.json(await kvGet(c, 'memory', {}))
+})
 
-app.put('/api/memory', authenticateToken, async (c) => {
+app.put('/api/memory', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
   const updates = await parseBody(c)
+  let memory = await kvGet(c, 'memory', {})
   Object.assign(memory, updates)
+  await kvPut(c, 'memory', memory)
   return c.json({ status: 'ok', memory })
 })
 
 // ==================== STATS ====================
 
-app.get('/api/stats', authenticateToken, (c) => {
+app.get('/api/stats', async (c) => {
+  const auth = c.req.header('Authorization')
+  if (!auth?.split(' ')[1]) return c.json({ error: 'token required' }, 401)
+  try { jwt.verify(auth.split(' ')[1], c.env.JWT_SECRET || 'nova-secret-key-123') } catch { return c.json({ error: 'invalid token' }, 403) }
+
+  let stats = await kvGet(c, 'stats', { totalCalls: 0, totalTokens: 0, totalTime: 0 })
   return c.json({
     ...stats,
     avgTime: stats.totalCalls ? Math.round(stats.totalTime / stats.totalCalls) : 0,
     avgTokens: stats.totalCalls ? Math.round(stats.totalTokens / stats.totalCalls) : 0,
-    knowledgeSize: knowledgeBase.length,
   })
 })
 
-// ==================== STATIC FILES ====================
+// ==================== HOME ====================
 
-app.get('/', (c) => c.html(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NOVA AI</title><style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#0d1117;color:#c9d1d9;text-align:center} h1{color:#58a6ff} .badge{background:#21262d;border-radius:8px;padding:2rem;max-width:500px}</style></head><body><div class="badge"><h1>🚀 NOVA AI</h1><p>API opérationnelle sur Cloudflare Workers</p><p style="font-size:0.9rem;color:#8b949e">Endpoints: /api/chat, /api/auth/*, /api/web-search, /api/knowledge/*</p></div></body></html>`))
+app.get('/', (c) => c.html(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>NOVA AI</title><style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;background:#0d1117;color:#c9d1d9;text-align:center}h1{color:#58a6ff}.badge{background:#21262d;border-radius:8px;padding:2rem;max-width:500px}</style></head><body><div class="badge"><h1>NOVA AI</h1><p>API opérationnelle sur Cloudflare Workers</p><p style="font-size:0.9rem;color:#8b949e">Endpoints: /api/chat, /api/auth/*, /api/web-search, /api/knowledge/*</p></div></body></html>`))
 
 export default app

@@ -2,3 +2,7 @@ name = "nova-ai"
 main = "workers/src/index.js"
 compatibility_date = "2025-06-01"
 compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "NOVA_KV"
+id = "198af5aee7514ff8919ab416d2c36d89"
