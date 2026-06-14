@@ -16,6 +16,12 @@ app.onError((err, c) => {
   return c.json({ error: err.message }, 500)
 })
 
+app.post('/api/debug/body', async (c) => {
+  const text = await c.req.text()
+  try { JSON.parse(text); return c.json({ text, length: text.length, chars: [...text].map(c => c.charCodeAt(0)), valid: true }) }
+  catch (e) { return c.json({ text, length: text.length, chars: [...text].map(c => c.charCodeAt(0)), valid: false, error: e.message }) }
+})
+
 // In-memory stores
 let users = []
 let knowledgeBase = []
