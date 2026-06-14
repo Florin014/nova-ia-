@@ -1,0 +1,29 @@
+{
+  "name": "nova-ai",
+  "version": "1.0.0",
+  "description": "Personal AI ecosystem - local-first, modular, multi-agent",
+  "main": "server.js",
+  "bin": {
+    "nova": "../cli.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "cli": "node ../cli.js",
+    "cli:gemini": "node ../cli.js --provider=gemini",
+    "cli:groq": "node ../cli.js --provider=groq",
+    "cli:xai": "node ../cli.js --provider=xai",
+    "cli:ollama": "node ../cli.js --provider=ollama"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.3",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "uuid": "^9.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

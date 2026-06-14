@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOVA AI</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:'Inter',sans-serif; background:#000; color:#fff; overflow:hidden; }
+    #messages { scroll-behavior:smooth; }
+    .msg-user { background:#fff; color:#000; border-radius:18px 18px 4px 18px; }
+    .msg-assistant { background:#1a1a1a; border:1px solid #333; border-radius:18px 18px 18px 4px; }
+    .msg-system { background:#111; border:1px solid #333; color:#888; border-radius:12px; }
+    pre { white-space:pre-wrap; word-wrap:break-word; }
+    .code-block { background:#0a0a0a; border:1px solid #222; border-radius:12px; margin:8px 0; }
+    .code-block pre { padding:16px; overflow-x:auto; font-family:'JetBrains Mono',monospace; font-size:13px; color:#ccc; }
+    .typing-dot { width:6px; height:6px; background:#666; border-radius:50%; animation:typing 1.4s infinite; }
+    .typing-dot:nth-child(2) { animation-delay:0.2s; }
+    .typing-dot:nth-child(3) { animation-delay:0.4s; }
+    @keyframes typing { 0%,60%,100% { opacity:0.3; transform:scale(0.8); } 30% { opacity:1; transform:scale(1); } }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation:fadeIn 0.25s ease-out; }
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:#333; border-radius:2px; }
+    textarea { scrollbar-width:thin; }
+    input:focus, textarea:focus { outline:none; }
+    .sidebar-item { border-radius:8px; padding:10px 12px; cursor:pointer; font-size:13px; color:#555; transition:all 0.15s; display:flex; align-items:center; gap:8px; }
+    .sidebar-item:hover { background:#1a1a1a; color:#ccc; }
+    .sidebar-item.active { background:#1a1a1a; color:#fff; }
+    .modal { background:#111; border:1px solid #222; border-radius:16px; }
+    .modal-input { background:#1a1a1a; border:1px solid #333; border-radius:8px; padding:8px 12px; color:#fff; font-size:13px; }
+    .modal-input:focus { border-color:#666; }
+    .toggle-btn { padding:8px 16px; border-radius:8px; font-size:13px; border:none; cursor:pointer; transition:all 0.15s; }
+    .tab-view { display:none; height:100%; }
+    .tab-view.active { display:flex; flex-direction:column; }
+    .tot-branch { border-left:2px solid #333; padding-left:12px; margin:8px 0; }
+    .tot-branch.high { border-left-color:#4caf50; }
+    .tot-branch.medium { border-left-color:#ffa726; }
+    .tot-branch.low { border-left-color:#f44336; }
+    .stat-card { background:#111; border:1px solid #222; border-radius:12px; padding:16px; }
+    .rk { background:#1a1a1a; border:1px solid #333; border-radius:8px; padding:8px 12px; cursor:pointer; transition:all 0.15s; }
+    .rk:hover { background:#222; }
+    .blink { animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity:0.3; } }
+  </style>
+</head>
+<body class="h-screen flex flex-col">
+
+  <!-- Auth Overlay -->
+  <div id="auth-overlay" class="fixed inset-0 bg-black z-[100] flex items-center justify-center p-4">
+    <div class="w-full max-w-sm">
+      <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold tracking-tighter text-white">NOVA AI</h1>
+        <p class="text-zinc-500 text-sm mt-2">Votre écosystème IA personnel</p>
+      </div>
+      
+      <div id="auth-box" class="modal p-6 shadow-2xl border border-zinc-800/50">
+        <div id="auth-login-view">
+          <h2 class="text-lg font-medium mb-4 text-white">Connexion</h2>
+          <div class="space-y-4">
+            <input type="text" id="login-username" placeholder="Nom d'utilisateur" class="modal-input w-full py-3 bg-zinc-900 border-zinc-800">
+            <div class="relative">
+              <input type="password" id="login-password" placeholder="Mot de passe" class="modal-input w-full py-3 bg-zinc-900 border-zinc-800 pr-10">
+              <button type="button" onclick="togglePassword('login-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+            <button onclick="login()" class="w-full py-3 rounded-xl bg-white text-black font-semibold hover:bg-zinc-200 transition">Se connecter</button>
+            <p class="text-center text-xs text-zinc-600">Pas de compte ? <button onclick="toggleAuth(false)" class="text-white hover:underline">Créer un compte</button></p>
+          </div>
+        </div>
+
+        <div id="auth-register-view" class="hidden">
+          <h2 class="text-lg font-medium mb-4 text-white">Créer un compte</h2>
+          <div class="space-y-4">
+            <input type="text" id="reg-username" placeholder="Nom d'utilisateur" class="modal-input w-full py-3 bg-zinc-900 border-zinc-800">
+            <div class="relative">
+              <input type="password" id="reg-password" placeholder="Mot de passe" class="modal-input w-full py-3 bg-zinc-900 border-zinc-800 pr-10">
+              <button type="button" onclick="togglePassword('reg-password', this)" class="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-300 transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+            
+            <!-- Captcha Section - Training data for next AI model -->
+            <div id="captcha-container" class="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+              <label class="text-[10px] uppercase tracking-wider text-zinc-600 block mb-2 font-bold">🧠 Labeling IA — Entraînement futur modèle</label>
+              <p class="text-[10px] text-zinc-700 mb-2">Tes réponses entraînent le prochain modèle NOVA. Merci !</p>
+              <div id="captcha-task-content" class="text-sm text-zinc-300 mb-3 bg-zinc-900 p-2 rounded border border-zinc-800 font-mono italic">Chargement...</div>
+              <div id="captcha-options" class="grid grid-cols-2 gap-2"></div>
+              <input type="hidden" id="captcha-task-id">
+              <input type="hidden" id="captcha-selected-answer">
+            </div>
+
+            <button onclick="register()" class="w-full py-3 rounded-xl bg-white text-black font-semibold hover:bg-zinc-200 transition">S'inscrire</button>
+            <p class="text-center text-xs text-zinc-600">Déjà un compte ? <button onclick="toggleAuth(true)" class="text-white hover:underline">Se connecter</button></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Bar -->
+  <div class="flex items-center justify-between px-5 py-3 border-b border-zinc-900" style="flex-shrink:0;">
+    <div class="flex items-center gap-3">
+      <span class="text-lg font-semibold tracking-tight text-white">NOVA</span>
+      <span class="text-[11px] text-zinc-600">by Florin Marcu</span>
+      <span class="text-[11px] px-2 py-0.5 rounded-full border text-zinc-400 border-zinc-800" id="status-badge">Ready</span>
+    </div>
+    <div class="flex items-center gap-4 text-xs text-zinc-600">
+      <span id="model-indicator">—</span>
+      <span id="mode-indicator">—</span>
+      <span id="tokens-indicator" class="hidden md:inline">—</span>
+      <button onclick="openSettings()" class="text-zinc-600 hover:text-zinc-300 transition text-sm p-1">⚙</button>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="flex flex-1 overflow-hidden" id="main-container">
+
+    <!-- Sidebar -->
+    <div class="w-48 flex-shrink-0 border-r border-zinc-900 p-3 flex flex-col gap-1 overflow-y-auto" style="background:#0a0a0a;">
+      <div class="sidebar-item active" data-tab="chat" onclick="switchTab('chat')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        Chat
+      </div>
+      <div class="sidebar-item" data-tab="tot" onclick="switchTab('tot')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        Tree of Thoughts
+      </div>
+      <div class="sidebar-item" data-tab="rag" onclick="switchTab('rag')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+        RAG / Savoir
+      </div>
+      <div class="sidebar-item" data-tab="web" onclick="switchTab('web')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
+        Web
+      </div>
+      <div class="sidebar-item" data-tab="scaffold" onclick="switchTab('scaffold')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+        Architecture
+      </div>
+      <div class="sidebar-item" data-tab="memory" onclick="switchTab('memory')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Mémoire
+      </div>
+      <div class="sidebar-item" data-tab="graph" onclick="switchTab('graph')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/></svg>
+        Graphe
+      </div>
+      <div class="sidebar-item" data-tab="vision" onclick="switchTab('vision')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Vision
+      </div>
+      <div class="sidebar-item" data-tab="agent" onclick="switchTab('agent')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        Agent
+      </div>
+      <div class="sidebar-item" data-tab="terminal" onclick="switchTab('terminal')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+        Terminal
+      </div>
+      <div class="sidebar-item" data-tab="dashboard" onclick="switchTab('dashboard')">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        Tableau de Bord
+      </div>
+      <div class="flex-1"></div>
+      <div id="chat-history" class="space-y-0.5 max-h-48 overflow-y-auto">
+        <div class="text-xs text-zinc-700 px-2 py-1">Aucun historique</div>
+      </div>
+      <button onclick="newChat()" class="text-xs px-3 py-2 rounded-lg border border-zinc-800 text-zinc-500 hover:text-white hover:border-zinc-700 transition w-full mt-1">+ Nouveau Chat</button>
+    </div>
+
+    <!-- Tab: Chat -->
+    <div id="tab-chat" class="tab-view active flex flex-col flex-1 min-w-0">
+      <div class="flex-1 overflow-y-auto px-4 py-6" id="messages" ondragover="event.preventDefault();event.dataTransfer.dropEffect='copy'" ondrop="handleDragDrop(event)"></div>
+      <div class="px-4 pb-4 pt-2" style="flex-shrink:0;">
+        <div class="max-w-3xl mx-auto">
+          <div class="flex items-end gap-2 bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 focus-within:border-zinc-700 transition">
+            <textarea id="prompt-input" rows="1" placeholder="Message (/search pour chercher sur le web)" class="flex-1 bg-transparent text-white placeholder-zinc-600 resize-none outline-none text-sm leading-relaxed" style="max-height:120px" oninput="autoResize(this)" onkeydown="handleKeyDown(event)"></textarea>
+            <div class="flex items-center gap-1.5">
+              <button onclick="toggleVoice()" id="voice-btn" class="p-1.5 hover:bg-zinc-800 rounded-lg transition text-zinc-500 hover:text-white" title="Parler">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+              </button>
+              <button onclick="document.getElementById('file-input').click()" class="p-1.5 hover:bg-zinc-800 rounded-lg transition text-zinc-500 hover:text-white" title="Joindre un fichier">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+              </button>
+              <input type="file" id="file-input" class="hidden" onchange="handleFileUpload(event)" multiple>
+              <button onclick="sendMessage()" class="p-1.5 rounded-lg transition text-black bg-white hover:bg-zinc-200" id="send-btn">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </button>
+            </div>
+          </div>
+            <div class="flex items-center justify-between mt-2 px-1">
+            <div class="flex gap-2">
+              <button onclick="togglePyodide()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition" id="pyodide-btn">Python</button>
+              <button onclick="toggleDebate()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition" id="debate-btn">Débat</button>
+              <button onclick="toggleReflection()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition" id="reflect-btn">Réflexion</button>
+              <button onclick="toggleTTS()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition" id="tts-btn">TTS</button>
+              <button onclick="document.getElementById('file-input').click()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition">Fichier</button>
+              <div class="relative inline-block" id="export-menu">
+                <button onclick="toggleExportMenu()" class="text-[11px] px-2 py-1 rounded-md text-zinc-600 hover:text-white border border-zinc-800 hover:border-zinc-700 transition">📥 Exporter</button>
+                <div id="export-dropdown" class="hidden absolute bottom-full right-0 mb-1 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden" style="min-width:140px;">
+                  <button onclick="exportChat('clipboard')" class="block w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white transition">📋 Presse-papier</button>
+                  <button onclick="exportChat('markdown')" class="block w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white transition">📄 Markdown</button>
+                  <button onclick="exportChat('json')" class="block w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white transition">🔄 JSON</button>
+                  <button onclick="exportChat('txt')" class="block w-full text-left px-3 py-2 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-white transition">📝 Texte brut</button>
+                </div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-zinc-500">
+              <span id="rag-badge" class="hidden text-[10px] px-1.5 py-0.5 rounded-full bg-blue-900/30 text-blue-400">RAG ✓</span>
+              <div id="file-preview" class="hidden flex items-center gap-2">
+                <span id="file-name"></span>
+                <button onclick="clearFiles()" class="text-red-400 hover:text-red-300">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Tree of Thoughts -->
+    <div id="tab-tot" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Tree of Thoughts</h2>
+        <p class="text-xs text-zinc-600 mt-1">Explore plusieurs branches de raisonnement en parallèle, évalue chaque chemin, et synthétise la meilleure réponse.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="tot-results">
+        <div class="text-center py-12 text-zinc-600 text-sm">
+          <p>Entre une question complexe ci-dessous</p>
+          <p class="text-xs mt-1">Le modèle explorera 3 branches indépendantes et les évaluera</p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2">
+          <textarea id="tot-input" rows="2" placeholder="Question pour Tree of Thoughts..." class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 resize-none outline-none text-sm focus:border-zinc-700 transition" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();runToT()}"></textarea>
+          <button onclick="runToT()" class="px-4 py-2 rounded-xl text-sm font-medium text-black bg-white hover:bg-zinc-200 transition self-end">Explorer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: RAG / Knowledge -->
+    <div id="tab-rag" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Hyper-RAG · Base de Connaissances</h2>
+        <p class="text-xs text-zinc-600 mt-1">Ajoute des fichiers (txt, md, code) à la mémoire. Le Chat les utilise automatiquement pour enrichir ses réponses.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="mb-4">
+          <div class="flex gap-2 mb-3">
+            <input type="file" id="rag-file-input" class="hidden" onchange="handleRAGUpload(event)" multiple accept=".txt,.md,.json,.js,.py,.html,.css,.csv">
+            <button onclick="document.getElementById('rag-file-input').click()" class="px-4 py-2 rounded-lg text-sm border border-zinc-700 text-zinc-400 hover:text-white hover:border-zinc-500 transition">+ Ajouter Fichier</button>
+            <button onclick="clearRAG()" class="px-3 py-2 rounded-lg text-sm border border-zinc-800 text-zinc-600 hover:text-red-400 transition">Tout Effacer</button>
+          </div>
+          <div id="rag-files" class="text-sm text-zinc-500">Aucun fichier indexé.</div>
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500 block mb-2">Rechercher dans la base</label>
+          <div class="flex gap-2">
+            <input id="rag-search" class="modal-input flex-1" placeholder="Recherche...">
+            <button onclick="searchRAG()" class="px-3 py-2 rounded-lg text-sm text-black bg-white hover:bg-zinc-200 transition">Chercher</button>
+          </div>
+          <div id="rag-search-results" class="mt-3 space-y-2"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Web -->
+    <div id="tab-web" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Web · Navigation & Contenu</h2>
+        <p class="text-xs text-zinc-600 mt-1">NOVA peut naviguer sur le web et lire des pages directement depuis ton navigateur.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="web-results">
+        <div class="text-center py-12 text-zinc-600 text-sm">
+          <p>Tape une URL ci-dessous pour :</p>
+          <p class="text-xs mt-1">📄 <strong>Lire</strong> → NOVA récupère et affiche le contenu texte de la page</p>
+          <p class="text-xs mt-1">🌐 <strong>Ouvrir</strong> → Ouvre la page dans ton navigateur par défaut</p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2">
+          <input id="web-url" type="url" placeholder="URL ou recherche..." class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 outline-none text-sm focus:border-zinc-700 transition" onkeydown="if(event.key==='Enter'){event.preventDefault();fetchWebUrl()}">
+          <button onclick="fetchWebUrl()" class="px-3 py-2 rounded-xl text-sm text-black bg-white hover:bg-zinc-200 transition self-end">Lire</button>
+          <button onclick="searchWeb()" class="px-3 py-2 rounded-xl text-sm border border-zinc-700 text-zinc-400 hover:text-white transition self-end" title="Rechercher sur le web">🔍</button>
+          <button onclick="openWebUrl()" class="px-3 py-2 rounded-xl text-sm border border-zinc-700 text-zinc-400 hover:text-white transition self-end" title="Ouvrir dans le navigateur">🌐</button>
+        </div>
+        <label class="text-xs text-zinc-600 mt-2 block">
+          <input type="checkbox" id="web-summarize" class="mr-1" checked>
+          Résumer avec NOVA après récupération
+        </label>
+      </div>
+    </div>
+
+    <!-- Tab: Memory -->
+    <div id="tab-memory" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Mémoire Long-Terme</h2>
+        <p class="text-xs text-zinc-600 mt-1">NOVA se souvient de toi : nom, technologies, projets, préférences. Ces infos sont injectées automatiquement dans chaque conversation.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="memory-content">
+        <div class="text-center py-8 text-zinc-500 text-sm">Chargement...</div>
+      </div>
+      <div class="p-4 border-t border-zinc-900 flex gap-2" style="flex-shrink:0;">
+        <button onclick="saveMemory()" class="px-4 py-2 rounded-lg text-sm text-black bg-white hover:bg-zinc-200 transition">Enregistrer</button>
+        <button onclick="extractMemoryFromChat()" class="px-4 py-2 rounded-lg text-sm border border-zinc-700 text-zinc-400 hover:text-white transition">Extraire du Chat</button>
+      </div>
+    </div>
+
+    <!-- Tab: Graph -->
+    <div id="tab-graph" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-medium text-white">Graphe de Connaissances</h2>
+          <p class="text-xs text-zinc-600 mt-1">Visualisation des concepts et leurs relations.</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="extractGraphFromChat()" class="px-3 py-1.5 rounded-lg text-xs border border-zinc-700 text-zinc-400 hover:text-white transition">Extraire</button>
+          <button onclick="clearGraph()" class="px-3 py-1.5 rounded-lg text-xs border border-zinc-800 text-zinc-600 hover:text-red-400 transition">Effacer</button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="graph-content">
+        <div class="text-center py-8 text-zinc-500 text-sm">Aucune donnée. Utilise "Extraire" depuis le chat.</div>
+      </div>
+    </div>
+
+    <!-- Tab: Vision -->
+    <div id="tab-vision" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Vision · Analyse d'Image</h2>
+        <p class="text-xs text-zinc-600 mt-1">Télécharge une image, NOVA l'analyse (Gemini Vision ou LLaVA).</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="vision-results">
+        <div class="text-center py-12 text-zinc-600 text-sm">
+          <p>Télécharge une image pour l'analyser</p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2 items-end">
+          <div class="flex-1">
+            <textarea id="vision-prompt" rows="1" placeholder="Question sur l'image (optionnel)" class="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 resize-none outline-none text-sm focus:border-zinc-700 transition mb-2"></textarea>
+            <input type="file" id="vision-file" accept="image/*" class="text-sm text-zinc-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-zinc-800 file:text-zinc-300 hover:file:bg-zinc-700">
+          </div>
+          <button onclick="analyzeVision()" class="px-4 py-3 rounded-xl text-sm font-medium text-black bg-white hover:bg-zinc-200 transition">Analyser</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Agent -->
+    <div id="tab-agent" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Agent Autonome</h2>
+        <p class="text-xs text-zinc-600 mt-1">Donne un objectif, NOVA planifie et exécute les étapes automatiquement.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="agent-results">
+        <div class="text-center py-12 text-zinc-600 text-sm">
+          <p>Ex : "Analyse le projet Nova et suggère des améliorations"</p>
+          <p class="text-xs mt-1">Ou : "Génère une documentation complète pour mon API"</p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2">
+          <textarea id="agent-input" rows="2" placeholder="Objectif pour l'agent..." class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 resize-none outline-none text-sm focus:border-zinc-700 transition" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();runAgent()}"></textarea>
+          <button onclick="runAgent()" class="px-4 py-2 rounded-xl text-sm font-medium text-black bg-white hover:bg-zinc-200 transition self-end">Lancer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Architecture / Scaffold -->
+    <div id="tab-scaffold" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Auto-Scaffolding · Mode Architecte</h2>
+        <p class="text-xs text-zinc-600 mt-1">Décris un projet, NOVA génère l'architecture complète : arborescence, fichiers, code.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4" id="scaffold-results">
+        <div class="text-center py-12 text-zinc-600 text-sm">
+          <p>Ex : "Crée une API REST Flask avec authentification JWT et base PostgreSQL"</p>
+          <p class="text-xs mt-1">Ou : "Génère une application React avec routing, contexte global et tests"</p>
+        </div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2">
+          <textarea id="scaffold-input" rows="2" placeholder="Décris le projet..." class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-white placeholder-zinc-600 resize-none outline-none text-sm focus:border-zinc-700 transition" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();runScaffold()}"></textarea>
+          <button onclick="runScaffold()" class="px-4 py-2 rounded-xl text-sm font-medium text-black bg-white hover:bg-zinc-200 transition self-end">Générer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Terminal -->
+    <div id="tab-terminal" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-medium text-white">Terminal Intégré</h2>
+          <p class="text-xs text-zinc-600 mt-1">Exécute des commandes système avec retour en temps réel.</p>
+        </div>
+        <button onclick="document.getElementById('terminal-output').innerHTML = ''" class="px-3 py-1.5 rounded-lg text-xs border border-zinc-800 text-zinc-600 hover:text-white transition">Effacer</button>
+      </div>
+      <div class="flex-1 bg-black p-4 font-mono text-sm overflow-y-auto" id="terminal-output" style="color: #00ff00;">
+        <div class="text-zinc-600">En attente d'une commande...</div>
+      </div>
+      <div class="p-4 border-t border-zinc-900" style="flex-shrink:0;">
+        <div class="flex gap-2">
+          <div class="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-2 focus-within:border-zinc-700 transition">
+            <span class="text-zinc-600 text-sm">$</span>
+            <input id="terminal-input" type="text" placeholder="Entrez une commande..." class="flex-1 bg-transparent text-white placeholder-zinc-700 outline-none text-sm" onkeydown="handleTerminalKey(event)">
+          </div>
+          <button onclick="runTerminalCommand()" class="px-4 py-2 rounded-xl text-sm font-medium text-black bg-white hover:bg-zinc-200 transition">Exécuter</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Dashboard -->
+    <div id="tab-dashboard" class="tab-view flex-col flex-1 min-w-0">
+      <div class="p-4 border-b border-zinc-900">
+        <h2 class="text-sm font-medium text-white">Tableau de Bord</h2>
+        <p class="text-xs text-zinc-600 mt-1">Statistiques d'utilisation et performances.</p>
+      </div>
+      <div class="flex-1 overflow-y-auto p-4">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6" id="stats-grid">
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-1">Appels</div><div class="text-xl text-white font-light" id="stat-calls">—</div></div>
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-1">Temps Moyen</div><div class="text-xl text-white font-light" id="stat-avgtime">—</div></div>
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-1">Tokens</div><div class="text-xl text-white font-light" id="stat-tokens">—</div></div>
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-1">Documents RAG</div><div class="text-xl text-white font-light" id="stat-rag">—</div></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-6">
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-2">Par Mode</div><div id="stat-modes" class="text-xs text-zinc-500"></div></div>
+          <div class="stat-card"><div class="text-xs text-zinc-600 mb-2">Par Provider</div><div id="stat-providers" class="text-xs text-zinc-500"></div></div>
+        </div>
+        <div class="stat-card">
+          <div class="text-xs text-zinc-600 mb-2">Modèles Disponibles</div>
+          <div id="stat-models" class="text-xs text-zinc-500"></div>
+        </div>
+        <button onclick="refreshStats()" class="mt-4 px-4 py-2 rounded-lg text-sm border border-zinc-700 text-zinc-400 hover:text-white transition">↻ Rafraîchir</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="fixed inset-0 bg-black/80 hidden flex items-center justify-center z-50" onclick="if(event.target===this)closeSettings()">
+    <div class="modal w-full max-w-sm mx-4 p-5" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-sm font-medium text-white">Paramètres</h2>
+        <button onclick="closeSettings()" class="text-zinc-600 hover:text-white text-lg leading-none">✕</button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label class="text-xs text-zinc-500 block mb-1.5">Fournisseur</label>
+          <div class="flex gap-2">
+            <button onclick="setProvider('ollama')" id="prov-ollama" class="toggle-btn flex-1 bg-zinc-900 text-zinc-400 border border-zinc-800">Ollama</button>
+            <button onclick="setProvider('groq')" id="prov-groq" class="toggle-btn flex-1 bg-zinc-900 text-zinc-400 border border-zinc-800">Groq ⚡</button>
+            <button onclick="setProvider('gemini')" id="prov-gemini" class="toggle-btn flex-1 bg-zinc-900 text-zinc-400 border border-zinc-800">Gemini</button>
+            <button onclick="setProvider('xai')" id="prov-xai" class="toggle-btn flex-1 bg-zinc-900 text-zinc-400 border border-zinc-800">xAI</button>
+          </div>
+        </div>
+        <div id="xai-key-section" class="hidden">
+          <label class="text-xs text-zinc-500 block mb-1">Clé API xAI (Grok)</label>
+          <input type="password" id="settings-xai-key" class="modal-input w-full" placeholder="xai-...">
+        </div>
+        <div id="gemini-key-section" class="hidden">
+          <label class="text-xs text-zinc-500 block mb-1">Clé API Gemini (gratuite)</label>
+          <input type="password" id="settings-gemini-key" class="modal-input w-full" placeholder="AIza...">
+        </div>
+        <div id="groq-key-section" class="hidden">
+          <label class="text-xs text-zinc-500 block mb-1">Clé API Groq (gratuite ⚡)</label>
+          <input type="password" id="settings-groq-key" class="modal-input w-full" placeholder="gsk_...">
+        </div>
+        <div>
+          <label class="text-xs text-zinc-500 block mb-1.5">Modèles installés</label>
+          <div id="models-list" class="text-sm text-zinc-500">Chargement...</div>
+        </div>
+        <div class="hidden">
+          <label class="text-xs text-zinc-500 block mb-1">URL distante</label>
+          <div class="flex gap-2">
+            <input type="url" id="settings-remote-host" class="modal-input flex-1" placeholder="https://...">
+            <button onclick="testRemoteHost()" class="toggle-btn px-3 border border-zinc-800 text-zinc-400 bg-zinc-900">Test</button>
+          </div>
+          <div id="remote-status" class="text-[11px] mt-1 text-zinc-600"></div>
+        </div>
+        <button onclick="saveSettings()" class="w-full py-2.5 rounded-lg text-sm font-medium text-black bg-white hover:bg-zinc-200 transition">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="crypto-utils.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

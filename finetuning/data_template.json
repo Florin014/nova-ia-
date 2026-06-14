@@ -1,0 +1,34 @@
+[
+    {
+        "instruction": "Explique le machine learning simplement",
+        "output": "Le machine learning est une méthode qui permet aux ordinateurs d'apprendre à partir d'exemples, sans être programmés étape par étape. C'est comme apprendre à un enfant à reconnaître un chat en lui montrant des photos, plutôt que de lui décrire chaque règle."
+    },
+    {
+        "instruction": "Écris une fonction Python qui vérifie si un nombre est premier",
+        "output": "def est_premier(n):\n    if n < 2:\n        return False\n    for i in range(2, int(n**0.5) + 1):\n        if n % i == 0:\n            return False\n    return True"
+    },
+    {
+        "instruction": "Quelle est la différence entre une liste et un tuple en Python ?",
+        "output": "Une liste est mutable (modifiable) et se définit avec des crochets []. Un tuple est immuable (non modifiable après création) et se définit avec des parenthèses (). Les tuples sont plus rapides et peuvent être utilisés comme clés de dictionnaire."
+    },
+    {
+        "instruction": "Comment gérer les fichiers PDF en Python ?",
+        "output": "Tu peux utiliser la bibliothèque PyMuPDF (fitz) ou pdfplumber. Installe-la avec 'pip install pymupdf'.\n\nimport fitz\n\n# Ouvrir un PDF\ndoc = fitz.open('fichier.pdf')\n\n# Lire chaque page\nfor page_num in range(len(doc)):\n    page = doc[page_num]\n    texte = page.get_text()\n    print(f'Page {page_num + 1}:\\n{texte}')\n\ndoc.close()"
+    },
+    {
+        "instruction": "Explique le principe SOLID en programmation orientée objet",
+        "output": "SOLID est un acronyme pour 5 principes de conception :\n\nS - Single Responsibility : Une classe doit avoir une seule raison de changer.\nO - Open/Closed : Les classes doivent être ouvertes à l'extension mais fermées à la modification.\nL - Liskov Substitution : Les sous-classes doivent pouvoir remplacer leur classe parente.\nI - Interface Segregation : Préférer des interfaces spécifiques plutôt qu'une interface générale.\nD - Dependency Inversion : Dépendre d'abstractions, pas d'implémentations concrètes."
+    },
+    {
+        "instruction": "Comment optimiser une requête SQL lente ?",
+        "output": "1. Ajoute des index sur les colonnes utilisées dans WHERE, JOIN et ORDER BY\n2. Évite SELECT *, ne sélectionne que les colonnes nécessaires\n3. Utilise EXPLAIN pour analyser le plan d'exécution\n4. Limite le nombre de JOIN si possible\n5. Ajoute des clauses WHERE pour réduire les données traitées\n6. Utilise LIMIT quand tu n'as besoin que d'un échantillon"
+    },
+    {
+        "instruction": "Qu'est-ce que le fine-tuning d'un modèle de langage ?",
+        "output": "Le fine-tuning consiste à prendre un modèle de langage déjà entraîné (comme Llama 3) et à le ré-entraîner sur un petit ensemble de données spécialisées. Cela permet d'adapter le modèle à un domaine particulier (médecine, code, droit) sans avoir à tout ré-entraîner depuis zéro. C'est beaucoup moins coûteux que l'entraînement complet."
+    },
+    {
+        "instruction": "Écris une fonction JavaScript qui fait une requête API avec fetch",
+        "output": "async function fetchAPI(url, options = {}) {\n    try {\n        const response = await fetch(url, {\n            headers: {\n                'Content-Type': 'application/json',\n                ...options.headers\n            },\n            ...options\n        });\n        \n        if (!response.ok) {\n            throw new Error(`HTTP ${response.status}: ${response.statusText}`);\n        }\n        \n        return await response.json();\n    } catch (error) {\n        console.error('Erreur API:', error);\n        throw error;\n    }\n}\n\n// Utilisation\n// const data = await fetchAPI('https://api.exemple.com/data');"
+    }
+]
