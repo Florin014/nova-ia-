@@ -1532,21 +1532,10 @@ async function openWebUrl() {
   const url = document.getElementById('web-url').value.trim();
   if (!url) return;
   const fullUrl = url.startsWith('http') ? url : 'https://' + url;
-
-  try {
-    const r = await apiFetch('/api/web-nav', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: fullUrl }),
-    });
-    const d = await r.json();
-    const resultsDiv = document.getElementById('web-results');
-    resultsDiv.innerHTML = `<div class="text-sm text-zinc-400">${escapeHtml(d.message)}</div>
-      <div class="mt-2"><a href="${escapeHtml(fullUrl)}" target="_blank" class="text-xs text-blue-400 hover:underline">${escapeHtml(fullUrl)}</a></div>`;
-  } catch (err) {
-    // Fallback: just open in new tab
-    window.open(fullUrl, '_blank');
-  }
+  window.open(fullUrl, '_blank');
+  const resultsDiv = document.getElementById('web-results');
+  resultsDiv.innerHTML = `<div class="text-sm text-zinc-400">Ouvert dans un nouvel onglet</div>
+    <div class="mt-2"><a href="${escapeHtml(fullUrl)}" target="_blank" class="text-xs text-blue-400 hover:underline">${escapeHtml(fullUrl)}</a></div>`;
 }
 
 // ==================== LONG-TERM MEMORY ====================

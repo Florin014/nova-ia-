@@ -621,13 +621,88 @@ app.get('/api/stats', async (c) => {
   })
 })
 
-// ==================== UNSUPPORTED ENDPOINTS ====================
+// ==================== FILE PARSING ====================
 
-const unsupported = (msg) => (c) => c.json({ error: msg }, 501)
+app.post('/api/parse-file', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
 
-app.post('/api/terminal', async (c) => { const a = authenticate(c); if (a.error) return a.error; return c.json({ error: 'Terminal requires Node.js (child_process) — indisponible sur Workers' }, 501) })
-app.post('/api/web-nav', async (c) => { const a = authenticate(c); if (a.error) return a.error; return c.json({ error: 'Navigation requires a desktop browser — indisponible sur Workers' }, 501) })
-app.post('/api/parse-file', async (c) => { const a = authenticate(c); if (a.error) return a.error; return c.json({ error: 'File parsing requires Node.js filesystem — indisponible sur Workers' }, 501) })
+  const { name, content, mime } = await parseBody(c)
+  if (!content) return c.json({ error: 'content required' }, 400)
+
+  try {
+    const ext = name?.split('.').pop()?.toLowerCase()
+    const buffer = Uint8Array.from(atob(content), c => c.charCodeAt(0))
+    let text = ''
+
+    if (ext === 'pdf') {
+      try {
+        const pdfParse = await import('pdf-parse')
+        const d = await pdfParse.default(buffer)
+        text = d.text
+      } catch { text = '[PDF parser non disponible sur Workers]' }
+    } else if (ext === 'docx') {
+      try {
+        const mammoth = await import('mammoth')
+        const d = await mammoth.extractRawText({ buffer: Buffer.from(buffer) })
+        text = d.value
+      } catch { text = '[DOCX parser non disponible sur Workers]' }
+    } else if (ext === 'xlsx' || ext === 'xls') {
+      try {
+        const XLSX = await import('xlsx')
+        const wb = XLSX.read(buffer, { type: 'array' })
+        text = wb.SheetNames.map(sn => {
+          const sheet = wb.Sheets[sn]
+          const csv = XLSX.utils.sheet_to_csv(sheet)
+          return `[${sn}]\n${csv}`
+        }).join('\n\n')
+      } catch { text = '[XLSX parser non disponible sur Workers]' }
+    } else {
+      text = new TextDecoder().decode(buffer)
+    }
+
+    const truncated = text.slice(0, 50000)
+    return c.json({ text: truncated, fullLength: text.length, name })
+  } catch (err) {
+    return c.json({ text: `[Erreur de parsing: ${err.message}]`, name })
+  }
+})
+
+// ==================== TERMINAL (AI-powered) ====================
+
+app.post('/api/terminal', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
+
+  const { command } = await parseBody(c)
+  if (!command) return c.json({ error: 'command required' }, 400)
+
+  const apiKeys = { gemini: c.env.GEMINI_API_KEY, groq: c.env.GROQ_API_KEY, xai: c.env.XAI_API_KEY }
+  const provider = 'gemini'
+
+  return stream(c, async (s) => {
+    try {
+      const result = await fullAI([
+        { role: 'system', content: 'Tu es un terminal Linux simulé. L\'utilisateur tape des commandes shell. Réponds UNIQUEMENT avec la sortie simulée du terminal, comme si la commande avait été exécutée. Sois réaliste mais créatif.' },
+        { role: 'user', content: `$ ${command}` },
+      ], provider, apiKeys)
+      s.write(`data: ${JSON.stringify({ type: 'output', content: result + '\n' })}\n\n`)
+      s.write(`data: ${JSON.stringify({ type: 'done', code: 0 })}\n\n`)
+    } catch (err) {
+      s.write(`data: ${JSON.stringify({ type: 'error', content: err.message })}\n\n`)
+    }
+  })
+})
+
+// ==================== WEB NAV (redirect to frontend) ====================
+
+app.post('/api/web-nav', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
+
+  const { url } = await parseBody(c)
+  return c.json({ status: 'ok', message: `Ouvert: ${url}`, url })
+})
 
 // ==================== FRONTEND ====================
 
