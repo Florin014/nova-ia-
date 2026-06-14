@@ -1,0 +1,9 @@
+name = "nova-ai"
+main = "workers/src/index.js"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes
+routes = [
+  { pattern = "nova-ai.*.workers.dev", custom_domain = false }
+]
