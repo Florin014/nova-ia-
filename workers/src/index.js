@@ -7,6 +7,14 @@ import jwt from 'jsonwebtoken'
 const app = new Hono()
 app.use('/*', cors())
 
+app.onError((err, c) => {
+  console.error('Error:', err.message, err.stack)
+  return c.json({ error: err.message, stack: err.stack?.split('\n').slice(0, 3).join('\n') }, 500)
+})
+
+// Test endpoint
+app.get('/api/test', (c) => c.json({ status: 'ok', time: Date.now() }))
+
 // In-memory stores
 let users = []
 let knowledgeBase = []
