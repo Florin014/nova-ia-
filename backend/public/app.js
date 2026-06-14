@@ -932,17 +932,33 @@ async function refreshStats() {
       provDiv.innerHTML = Object.entries(s.callsByProvider).map(([k, v]) => `<div class="flex justify-between py-0.5"><span>${k}</span><span class="text-zinc-400">${v}</span></div>`).join('');
     } else { provDiv.textContent = 'Aucune donnée.'; }
 
+    // Load training data stats
     try {
-      const mr = await apiFetch('/api/info');
-      const mi = await mr.json();
-      const modelsDiv = document.getElementById('stat-models');
-      if (mi.ollama?.models?.length) {
-        modelsDiv.innerHTML = mi.ollama.models.map(m => `<div class="text-zinc-400 py-0.5">${m}</div>`).join('');
-      } else {
-        modelsDiv.textContent = 'Aucun modèle trouvé.';
-      }
+      const tr = await apiFetch('/api/training-data');
+      const td = await tr.json();
+      const tdEl = document.getElementById('stat-training');
+      if (tdEl) tdEl.textContent = td.total || 0;
     } catch {}
   } catch {}
+}
+
+// ==================== TRAINING DATA ====================
+
+async function downloadTrainingData() {
+  try {
+    const r = await apiFetch('/api/training-data/export');
+    const text = await r.text();
+    const blob = new Blob([text], { type: 'application/jsonl' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `nova-training-${Date.now()}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(url);
+    addSystemMessage(`[Training] ${text.split('\n').filter(l => l).length} conversations exportées !`);
+  } catch (err) {
+    addSystemMessage(`[Training] Erreur: ${err.message}`);
+  }
 }
 
 // ==================== UI HELPERS ====================
@@ -1944,3 +1960,4 @@ window.logout = logout;
 window.exportChat = exportChat;
 window.toggleExportMenu = toggleExportMenu;
 window.togglePassword = togglePassword;
+window.downloadTrainingData = downloadTrainingData;

@@ -200,6 +200,15 @@ app.get('/api/captcha/task', (c) => {
   return c.json(publicTask)
 })
 
+app.post('/api/captcha/submit', async (c) => {
+  const { taskId, answer, username } = await parseBody(c)
+  let responses = await kvGet(c, 'captcha_responses', [])
+  responses.push({ userId: username || 'anonymous', taskId, answer, timestamp: Date.now() })
+  if (responses.length > 5000) responses = responses.slice(-5000)
+  await kvPut(c, 'captcha_responses', responses)
+  return c.json({ status: 'ok' })
+})
+
 // ==================== CHAT ====================
 
 app.post('/api/chat', async (c) => {
@@ -237,6 +246,14 @@ OUTILS : [TOOL:search] recherche → Cherche sur le web | [TOOL:url] https://...
       let stats = await kvGet(c, 'stats', { totalCalls: 0, totalTokens: 0, totalTime: 0 })
       stats.totalCalls++; stats.totalTokens += tokensEst; stats.totalTime += elapsed
       await kvPut(c, 'stats', stats)
+      // Save conversation for training data
+      try {
+        const conversation = [{ role: 'system', content: SYSTEM_BEHAVIOR }, ...messages.filter(m => m.role !== 'system'), { role: 'assistant', content: full }]
+        let convs = await kvGet(c, 'training_convs', [])
+        convs.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), messages: conversation, timestamp: Date.now(), user: user.username })
+        if (convs.length > 1000) convs = convs.slice(-1000)
+        await kvPut(c, 'training_convs', convs)
+      } catch {}
       s.write(`data: ${JSON.stringify({ type: 'done', content: full, elapsed, mode, tokens: tokensEst })}\n\n`)
     } catch (err) {
       s.write(`data: ${JSON.stringify({ type: 'error', content: err.message })}\n\n`)
@@ -702,6 +719,40 @@ app.post('/api/web-nav', async (c) => {
 
   const { url } = await parseBody(c)
   return c.json({ status: 'ok', message: `Ouvert: ${url}`, url })
+})
+
+// ==================== TRAINING DATA ====================
+
+app.get('/api/training-data', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
+
+  let convs = await kvGet(c, 'training_convs', [])
+  return c.json({ total: convs.length, conversations: convs.slice(-100).reverse() })
+})
+
+app.get('/api/training-data/export', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
+
+  let convs = await kvGet(c, 'training_convs', [])
+  // Format JSONL: one JSON object per line
+  let jsonl = ''
+  for (const conv of convs) {
+    jsonl += JSON.stringify({ messages: conv.messages }) + '\n'
+  }
+  return c.text(jsonl, 200, {
+    'Content-Type': 'application/jsonl',
+    'Content-Disposition': 'attachment; filename="nova-training-data.jsonl"',
+  })
+})
+
+app.get('/api/captcha-data', async (c) => {
+  const { user, error } = authenticate(c)
+  if (error) return error
+
+  let responses = await kvGet(c, 'captcha_responses', [])
+  return c.json({ total: responses.length, responses: responses.slice(-500).reverse() })
 })
 
 // ==================== FRONTEND ====================
