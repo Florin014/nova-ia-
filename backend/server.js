@@ -1364,8 +1364,8 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`\x1b[36m[NOVA AI] Server running on http://localhost:${PORT}`);
+app.listen(PORT, process.env.IP || '0.0.0.0', () => {
+  console.log(`\x1b[36m[NOVA AI] Server running on http://${process.env.IP || '0.0.0.0'}:${PORT}`);
   console.log(`\x1b[36m[NOVA AI] Features: chat, debate, ToT, RAG, tests, scaffold, voice, reflection, web, search, questions, memory, graph, vision, agent, files, tools`);
   console.log(`\x1b[36m[NOVA AI] Gemini: ${GEMINI_AVAILABLE ? '✓' : '✗'} | Ollama: local`);
 });
