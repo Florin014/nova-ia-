@@ -7,19 +7,13 @@ import jwt from 'jsonwebtoken'
 const app = new Hono()
 app.use('/*', cors())
 
-function parseJson(text) {
-  try { return JSON.parse(text) } catch { return null }
+async function parseBody(c) {
+  const text = await c.req.text()
+  return JSON.parse(text)
 }
 
 app.onError((err, c) => {
-  console.error('Error:', err.message, err.stack)
   return c.json({ error: err.message }, 500)
-})
-
-// Debug endpoint
-app.get('/api/debug/body', async (c) => {
-  const text = await c.req.text()
-  return c.json({ received: text, length: text.length })
 })
 
 // In-memory stores
@@ -192,7 +186,7 @@ function trackCall(mode, provider, tokens, time) {
 // ==================== AUTH ====================
 
 app.post('/api/auth/register', async (c) => {
-  const { username, password } = await c.req.json()
+  const { username, password } = await parseBody(c)
   if (!username || !password) return c.json({ error: 'username and password required' }, 400)
   if (users.find(u => u.username === username)) return c.json({ error: 'user already exists' }, 400)
   const hashedPassword = await bcrypt.hash(password, 10)
@@ -201,7 +195,7 @@ app.post('/api/auth/register', async (c) => {
 })
 
 app.post('/api/auth/login', async (c) => {
-  const { username, password } = await c.req.json()
+  const { username, password } = await parseBody(c)
   const user = users.find(u => u.username === username)
   if (!user) return c.json({ error: 'invalid credentials' }, 400)
   const valid = await bcrypt.compare(password, user.password)
@@ -223,7 +217,7 @@ app.get('/api/captcha/task', (c) => {
 })
 
 app.post('/api/captcha/submit', async (c) => {
-  const { taskId, answer, username } = await c.req.json()
+  const { taskId, answer, username } = await parseBody(c)
   captchaResponses.push({ userId: username || 'anonymous', taskId, answer, timestamp: Date.now() })
   return c.json({ status: 'ok' })
 })
@@ -231,7 +225,7 @@ app.post('/api/captcha/submit', async (c) => {
 // ==================== CHAT ====================
 
 app.post('/api/chat', authenticateToken, async (c) => {
-  const { messages, provider = 'gemini' } = await c.req.json()
+  const { messages, provider = 'gemini' } = await parseBody(c)
   if (!messages?.length) return c.json({ error: 'Messages required' }, 400)
 
   const mode = detectMode(messages[messages.length - 1].content)
@@ -278,7 +272,7 @@ OUTILS DISPONIBLES :
 // ==================== WEB SEARCH ====================
 
 app.post('/api/web-search', authenticateToken, async (c) => {
-  const { query } = await c.req.json()
+  const { query } = await parseBody(c)
   if (!query) return c.json({ error: 'query required' }, 400)
 
   return stream(c, async (stream) => {
@@ -309,7 +303,7 @@ app.post('/api/web-search', authenticateToken, async (c) => {
 // ==================== WEB FETCH ====================
 
 app.post('/api/fetch-url', authenticateToken, async (c) => {
-  const { url } = await c.req.json()
+  const { url } = await parseBody(c)
   if (!url) return c.json({ error: 'URL required' }, 400)
 
   return stream(c, async (stream) => {
@@ -333,7 +327,7 @@ app.post('/api/fetch-url', authenticateToken, async (c) => {
 // ==================== KNOWLEDGE BASE ====================
 
 app.post('/api/knowledge/add', authenticateToken, async (c) => {
-  const { name, content } = await c.req.json()
+  const { name, content } = await parseBody(c)
   if (!name || !content) return c.json({ error: 'name and content required' }, 400)
   knowledgeBase.push({ name, content, addedAt: Date.now() })
   return c.json({ status: 'ok', total: knowledgeBase.length })
@@ -350,7 +344,7 @@ app.get('/api/knowledge/search', authenticateToken, (c) => {
 app.get('/api/memory', authenticateToken, (c) => c.json(memory))
 
 app.put('/api/memory', authenticateToken, async (c) => {
-  const updates = await c.req.json()
+  const updates = await parseBody(c)
   Object.assign(memory, updates)
   return c.json({ status: 'ok', memory })
 })
